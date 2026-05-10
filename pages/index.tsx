@@ -195,14 +195,22 @@ export default function Home() {
   const [pd, setPd] = useState("");
   const [sh, setSh] = useState(false);
   const [activeFeature, setActiveFeature] = useState<string|null>(null);
+  const [ownerOverride, setOwnerOverride] = useState<string>("");
+  const [showOwnerInput, setShowOwnerInput] = useState(false);
 
   useEffect(()=>setMounted(true),[]);
   useEffect(()=>{
     if(!publicKey||!signTransaction||!signAllTransactions)return;
     const prov=new anchor.AnchorProvider(connection,{publicKey,signTransaction,signAllTransactions} as any,{commitment:"confirmed"});
     setProgram(new anchor.Program(IDL as any,PROGRAM_ID,prov));
-    setVaultPda(getVaultPda(publicKey,PROGRAM_ID)[0]);
-  },[publicKey,connection,signTransaction,signAllTransactions]);
+    // If ownerOverride is set (duress mode), derive vault from owner's address
+    try {
+      const ownerPk = ownerOverride.trim() ? new PublicKey(ownerOverride.trim()) : publicKey;
+      setVaultPda(getVaultPda(ownerPk,PROGRAM_ID)[0]);
+    } catch {
+      setVaultPda(getVaultPda(publicKey,PROGRAM_ID)[0]);
+    }
+  },[publicKey,connection,signTransaction,signAllTransactions,ownerOverride]);
 
   const fetch_=useCallback(async()=>{
     if(!program||!vaultPda)return;
@@ -270,6 +278,14 @@ export default function Home() {
       {msg&&<div style={S.toast(msgT)}>{msgT==="ok"?"✓":msgT==="warn"?"⚠":"✕"} {msg}</div>}
       {activeFeature&&<FeatureModal fkey={activeFeature} onClose={()=>setActiveFeature(null)}/>}
 
+      {/* Duress mode banner — shows when connected wallet is not the vault owner */}
+      {publicKey&&vaultData&&vaultData.owner.toString()!==publicKey.toString()&&(
+        <div style={{background:"rgba(220,38,38,0.08)",borderBottom:"1px solid rgba(220,38,38,0.15)",padding:"10px 60px",display:"flex",alignItems:"center",gap:12,fontSize:13}}>
+          <span style={{color:"#f87171",fontWeight:600}}>⚠ 胁迫模式</span>
+          <span style={{color:"rgba(255,255,255,0.4)"}}>你正在以胁迫钱包身份访问此金库。提款将触发30天时间锁。</span>
+        </div>
+      )}
+
       {!publicKey?(
         <div style={S.hero}>
           <div style={{width:96,height:96,borderRadius:28,background:"linear-gradient(135deg,rgba(124,58,237,0.12),rgba(79,70,229,0.06))",border:"1px solid rgba(124,58,237,0.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:48,marginBottom:36}}>🔐</div>
@@ -294,6 +310,42 @@ export default function Home() {
         </div>
       ):(
         <div style={S.main}>
+          {/* When no vault: show option to view another wallet's vault (duress mode) */}
+          {!vaultData&&(
+            <div style={{background:"rgba(124,58,237,0.05)",border:"1px solid rgba(124,58,237,0.1)",borderRadius:16,padding:"16px 20px",marginBottom:20,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+              <div style={{fontSize:13,color:"rgba(255,255,255,0.4)",flexShrink:0}}>🔍 查看他人金库（胁迫钱包场景）：</div>
+              <input
+                value={ownerOverride}
+                onChange={e=>setOwnerOverride(e.target.value)}
+                placeholder="输入金库所有者的钱包地址"
+                style={{...S.input,flex:1,marginBottom:0,minWidth:200,fontSize:12}}
+              />
+              <button
+                onClick={()=>{
+                  if(ownerOverride.trim()){
+                    try{new PublicKey(ownerOverride.trim());fetch_();}catch{note("地址格式不正确","err");}
+                  }
+                }}
+                style={{background:"rgba(124,58,237,0.2)",border:"1px solid rgba(124,58,237,0.3)",borderRadius:10,padding:"8px 16px",color:"#a78bfa",fontSize:13,cursor:"pointer",flexShrink:0}}>
+                查看金库
+              </button>
+              {ownerOverride&&<button onClick={()=>{setOwnerOverride("");}} style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.2)",fontSize:12,cursor:"pointer"}}>清除</button>}
+            </div>
+          )}
+
+          {/* Duress mode: view another wallet's vault */}
+          {!vaultData&&(
+            <div style={{background:"rgba(124,58,237,0.05)",border:"1px solid rgba(124,58,237,0.1)",borderRadius:16,padding:"16px 20px",marginBottom:20}}>
+              <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",marginBottom:10,fontWeight:500}}>🔍 胁迫钱包模式 — 查看他人金库</div>
+              <div style={{fontSize:12,color:"rgba(255,255,255,0.25)",marginBottom:12}}>如果你是以胁迫钱包身份登录，输入金库所有者的主钱包地址，即可查看并操作其金库（提款将自动触发30天时间锁）</div>
+              <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                <input value={ownerOverride} onChange={e=>setOwnerOverride(e.target.value)} placeholder="输入金库所有者的主钱包地址（44位字符）" style={{...S.input,flex:1,marginBottom:0,minWidth:240,fontSize:12}}/>
+                <button onClick={()=>{if(ownerOverride.trim()){try{new PublicKey(ownerOverride.trim());fetch_();}catch{note("地址格式不正确","err");}}}} style={{background:"rgba(124,58,237,0.15)",border:"1px solid rgba(124,58,237,0.25)",borderRadius:10,padding:"10px 18px",color:"#a78bfa",fontSize:13,cursor:"pointer",flexShrink:0,fontWeight:500}}>查看金库</button>
+                {ownerOverride&&<button onClick={()=>{setOwnerOverride("");note("已清除","ok");}} style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.2)",fontSize:12,cursor:"pointer"}}>清除</button>}
+              </div>
+            </div>
+          )}
+
           {!vaultData?(
             <div style={S.grid53}>
               <div style={S.card}>
